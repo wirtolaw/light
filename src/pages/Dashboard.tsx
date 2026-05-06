@@ -155,10 +155,14 @@ export default function Dashboard() {
     : todayCalories / targetCalories >= 0.8 ? 'text-yellow-500'
     : 'text-blue-500';
 
+  const protRatio = proteinTarget === 0 ? 0 : todayProtein / proteinTarget;
   const protColor = proteinTarget === 0 ? 'text-gray-800'
-    : todayProtein / proteinTarget >= 1 ? 'text-blue-500'
-    : todayProtein / proteinTarget >= 0.6 ? 'text-yellow-500'
-    : 'text-red-500';
+    : protRatio >= 1 ? 'text-[#1565C0]'
+    : protRatio >= 0.9 ? 'text-[#42A5F5]'
+    : protRatio >= 0.8 ? 'text-[#FDD835]'
+    : protRatio >= 0.7 ? 'text-[#FFB300]'
+    : protRatio >= 0.6 ? 'text-[#FB8C00]'
+    : 'text-[#E53935]';
 
   const handleSaveActivityFactor = async () => {
     const val = parseFloat(editActivityValue);

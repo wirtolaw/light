@@ -51,6 +51,10 @@ export default function Calories() {
   const [showTargetEditor, setShowTargetEditor] = useState(false);
   const [editTargetValue, setEditTargetValue] = useState('0.8');
   const [weightRecords, setWeightRecords] = useState<WeightRecord[]>([]);
+  const [customFactors, setCustomFactors] = useState<{val: number; label: string}[]>([]);
+  const [showAddCustom, setShowAddCustom] = useState(false);
+  const [customVal, setCustomVal] = useState('');
+  const [customLabel, setCustomLabel] = useState('');
 
   const userId = getUserId();
 
@@ -118,6 +122,17 @@ export default function Calories() {
           setCalorieTargetFactor(0.8);
         }
       }
+    }
+
+    // Load custom calorie factors
+    const { data: profileForFactors } = await supabase
+      .from('light_user_profile')
+      .select('custom_calorie_factors')
+      .eq('user_id', userId)
+      .limit(1)
+      .single();
+    if (profileForFactors?.custom_calorie_factors) {
+      setCustomFactors(profileForFactors.custom_calorie_factors);
     }
 
     // Load custom foods
@@ -190,9 +205,12 @@ export default function Calories() {
   const getProteinColor = () => {
     if (proteinTarget === 0) return 'text-gray-800';
     const ratio = dayProtein / proteinTarget;
-    if (ratio >= 1) return 'text-blue-500';
-    if (ratio >= 0.6) return 'text-yellow-500';
-    return 'text-red-500';
+    if (ratio >= 1) return 'text-[#1565C0]';
+    if (ratio >= 0.9) return 'text-[#42A5F5]';
+    if (ratio >= 0.8) return 'text-[#FDD835]';
+    if (ratio >= 0.7) return 'text-[#FFB300]';
+    if (ratio >= 0.6) return 'text-[#FB8C00]';
+    return 'text-[#E53935]';
   };
 
   const mealLabels: Record<string, string> = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
@@ -277,7 +295,6 @@ export default function Calories() {
     setCalorieTargetFactor(val);
     setShowTargetEditor(false);
 
-    // Upsert into weight_records
     const { data: existing } = await supabase
       .from('light_weight_records')
       .select('id')
@@ -295,6 +312,23 @@ export default function Calories() {
         calorie_target_factor: val,
       });
     }
+  };
+
+  const handleAddCustomFactor = async () => {
+    const val = parseFloat(customVal);
+    if (isNaN(val) || val <= 0 || !customLabel.trim()) return;
+    const updated = [...customFactors, { val, label: customLabel.trim() }];
+    setCustomFactors(updated);
+    setShowAddCustom(false);
+    setCustomVal('');
+    setCustomLabel('');
+    await supabase.from('light_user_profile').update({ custom_calorie_factors: updated }).eq('user_id', userId);
+  };
+
+  const handleDeleteCustomFactor = async (idx: number) => {
+    const updated = customFactors.filter((_, i) => i !== idx);
+    setCustomFactors(updated);
+    await supabase.from('light_user_profile').update({ custom_calorie_factors: updated }).eq('user_id', userId);
   };
 
   return (
@@ -469,6 +503,67 @@ export default function Calories() {
                   {opt.label}
                 </button>
               ))}
+              {customFactors.map((cf, idx) => (
+                <div key={idx} className="flex items-center gap-1">
+                  <button
+                    onClick={() => setEditTargetValue(String(cf.val))}
+                    className={`flex-1 text-left px-3 py-2 rounded-lg text-sm ${
+                      editTargetValue === String(cf.val) ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-600'
+                    }`}
+                  >
+                    {cf.val} {cf.label}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteCustomFactor(idx)}
+                    className="text-gray-300 text-sm px-1 hover:text-red-400"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+
+              {!showAddCustom ? (
+                <button
+                  onClick={() => setShowAddCustom(true)}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-blue-500 bg-gray-50"
+                >
+                  + 自定义
+                </button>
+              ) : (
+                <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="系数"
+                      value={customVal}
+                      onChange={e => setCustomVal(e.target.value)}
+                      className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-green-500"
+                    />
+                    <input
+                      placeholder="名称"
+                      value={customLabel}
+                      onChange={e => setCustomLabel(e.target.value)}
+                      className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-green-500"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAddCustomFactor}
+                      disabled={!customVal || !customLabel.trim()}
+                      className="flex-1 py-1.5 rounded-lg bg-blue-500 text-white text-sm disabled:opacity-50"
+                    >
+                      保存
+                    </button>
+                    <button
+                      onClick={() => { setShowAddCustom(false); setCustomVal(''); setCustomLabel(''); }}
+                      className="py-1.5 px-3 rounded-lg bg-gray-100 text-gray-500 text-sm"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="text-center text-xs text-gray-400 mb-3">
