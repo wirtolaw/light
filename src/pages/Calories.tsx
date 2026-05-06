@@ -26,6 +26,14 @@ interface Profile {
   start_weight: number;
 }
 
+interface WeightRecord {
+  date: string;
+  morning_weight: number | null;
+  activity_factor: number | null;
+  calorie_target_factor: number | null;
+  is_fasting_day: boolean;
+}
+
 export default function Calories() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [records, setRecords] = useState<FoodRecord[]>([]);
@@ -39,6 +47,10 @@ export default function Calories() {
   const [editSaving, setEditSaving] = useState(false);
   const [customFoods, setCustomFoods] = useState<FoodItem[]>([]);
   const [activityFactor, setActivityFactor] = useState(1.2);
+  const [calorieTargetFactor, setCalorieTargetFactor] = useState(0.8);
+  const [showTargetEditor, setShowTargetEditor] = useState(false);
+  const [editTargetValue, setEditTargetValue] = useState('0.8');
+  const [weightRecords, setWeightRecords] = useState<WeightRecord[]>([]);
 
   const userId = getUserId();
 
@@ -68,21 +80,44 @@ export default function Calories() {
 
     if (profileData) setProfile(profileData);
 
-    // Get latest weight and activity factor for selected date
+    // Get weight records for this month + recent history for factor inheritance
     const { data: weightData } = await supabase
       .from('light_weight_records')
-      .select('morning_weight, activity_factor, date')
+      .select('date, morning_weight, activity_factor, calorie_target_factor, is_fasting_day')
       .eq('user_id', userId)
       .order('date', { ascending: false })
-      .limit(10);
+      .limit(60);
 
     if (weightData && weightData.length > 0) {
+      setWeightRecords(weightData);
       const latestWithWeight = weightData.find(w => w.morning_weight);
       if (latestWithWeight) setCurrentWeight(latestWithWeight.morning_weight);
-      // Find activity factor: prefer selected date, fallback to most recent
+
+      // Activity factor: prefer selected date, fallback to most recent
       const selectedAF = weightData.find(w => w.date === selectedDate && w.activity_factor);
       const recentAF = weightData.find(w => w.activity_factor);
       setActivityFactor(selectedAF?.activity_factor || recentAF?.activity_factor || 1.2);
+
+      // Calorie target factor logic
+      const selectedRecord = weightData.find(w => w.date === selectedDate);
+      if (selectedRecord?.calorie_target_factor != null) {
+        // 1. User manually set for this day
+        setCalorieTargetFactor(selectedRecord.calorie_target_factor);
+      } else if (selectedRecord?.is_fasting_day) {
+        // 2. Fasting day without manual override → 0.15
+        setCalorieTargetFactor(0.15);
+      } else {
+        // 3. Inherit from most recent non-fasting day
+        const recentNonFasting = weightData.find(w =>
+          w.date < selectedDate && !w.is_fasting_day && w.calorie_target_factor != null
+        );
+        if (recentNonFasting?.calorie_target_factor != null) {
+          setCalorieTargetFactor(recentNonFasting.calorie_target_factor);
+        } else {
+          // 4. Default
+          setCalorieTargetFactor(0.8);
+        }
+      }
     }
 
     // Load custom foods
@@ -115,6 +150,12 @@ export default function Calories() {
     dailyCalories[r.date] = (dailyCalories[r.date] || 0) + r.calories;
   });
 
+  // Fasting days map
+  const fastingDays: Record<string, boolean> = {};
+  weightRecords.forEach(w => {
+    if (w.is_fasting_day) fastingDays[w.date] = true;
+  });
+
   // Selected day records
   const dayRecords = records.filter(r => r.date === selectedDate);
   const dayTotal = dayRecords.reduce((sum, r) => sum + r.calories, 0);
@@ -122,7 +163,7 @@ export default function Calories() {
   const dayCarbs = dayRecords.reduce((sum, r) => sum + (r.carbs || 0), 0);
   const dayFat = dayRecords.reduce((sum, r) => sum + (r.fat || 0), 0);
 
-  // TDEE
+  // TDEE & target
   const weight = currentWeight || profile?.start_weight || 60;
   const bmr = profile
     ? (profile.gender === 'female'
@@ -130,6 +171,29 @@ export default function Calories() {
       : 66.47 + 13.75 * weight + 5.003 * profile.height_cm - 6.755 * profile.age)
     : 1400;
   const tdee = Math.round(bmr * activityFactor);
+  const targetCalories = Math.round(tdee * calorieTargetFactor);
+  const deficit = tdee - dayTotal;
+  const canStillEat = targetCalories - dayTotal;
+
+  // Protein target
+  const proteinTarget = Math.round(weight * 1.2);
+
+  // Color helpers
+  const getCalorieColor = () => {
+    if (targetCalories === 0) return 'text-gray-800';
+    const ratio = dayTotal / targetCalories;
+    if (ratio > 1) return 'text-red-500';
+    if (ratio >= 0.8) return 'text-orange-500';
+    return 'text-blue-500';
+  };
+
+  const getProteinColor = () => {
+    if (proteinTarget === 0) return 'text-gray-800';
+    const ratio = dayProtein / proteinTarget;
+    if (ratio >= 1) return 'text-blue-500';
+    if (ratio >= 0.6) return 'text-orange-500';
+    return 'text-red-500';
+  };
 
   const mealLabels: Record<string, string> = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
 
@@ -173,7 +237,6 @@ export default function Calories() {
       updates.carbs = editCalculated.carbs;
       updates.fat = editCalculated.fat;
     } else {
-      // No food item found in database, scale proportionally from original
       const ratio = (parseFloat(editWeight) || 0) / (editingRecord.weight_g || 1);
       updates.calories = Math.round(editingRecord.calories * ratio);
       updates.protein = Math.round(editingRecord.protein * ratio * 10) / 10;
@@ -196,7 +259,6 @@ export default function Calories() {
     loadData();
   };
 
-  // Preview values for edit modal (use calculated if food found, else scale proportionally)
   const editPreview = useMemo(() => {
     if (!editingRecord) return null;
     if (editCalculated) return editCalculated;
@@ -208,6 +270,32 @@ export default function Calories() {
       fat: Math.round(editingRecord.fat * ratio * 10) / 10,
     };
   }, [editingRecord, editCalculated, editWeight]);
+
+  const handleSaveTargetFactor = async () => {
+    const val = parseFloat(editTargetValue);
+    if (isNaN(val) || val < 0 || val > 2) return;
+    setCalorieTargetFactor(val);
+    setShowTargetEditor(false);
+
+    // Upsert into weight_records
+    const { data: existing } = await supabase
+      .from('light_weight_records')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('date', selectedDate)
+      .limit(1)
+      .single();
+
+    if (existing) {
+      await supabase.from('light_weight_records').update({ calorie_target_factor: val }).eq('id', existing.id);
+    } else {
+      await supabase.from('light_weight_records').insert({
+        user_id: userId,
+        date: selectedDate,
+        calorie_target_factor: val,
+      });
+    }
+  };
 
   return (
     <div className="px-4 pb-20 pt-6">
@@ -232,6 +320,7 @@ export default function Calories() {
           const dateStr = format(day, 'yyyy-MM-dd');
           const cal = dailyCalories[dateStr];
           const isSelected = selectedDate === dateStr;
+          const isFasting = fastingDays[dateStr];
 
           return (
             <button
@@ -241,7 +330,7 @@ export default function Calories() {
                 isSelected ? 'ring-2 ring-green-500 bg-green-50' : cal ? 'bg-gray-50' : ''
               }`}
             >
-              <span className="font-medium">{day.getDate()}</span>
+              <span className="font-medium">{day.getDate()}{isFasting ? ' 💧' : ''}</span>
               {cal && <span className="text-[9px] text-gray-500">{cal}</span>}
             </button>
           );
@@ -251,7 +340,7 @@ export default function Calories() {
       {/* Daily summary */}
       <div className="bg-gray-50 rounded-xl p-4 mb-4">
         <div className="flex justify-between items-center mb-3">
-          <h3 className="text-sm font-medium">{selectedDate}</h3>
+          <h3 className="text-sm font-medium">{selectedDate}{fastingDays[selectedDate] ? ' 💧' : ''}</h3>
           <button
             onClick={() => setShowFoodModal(true)}
             className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg"
@@ -260,13 +349,14 @@ export default function Calories() {
           </button>
         </div>
 
+        {/* Intake summary with colors */}
         <div className="grid grid-cols-4 gap-2 text-center text-xs mb-4">
           <div className="bg-white rounded-lg p-2">
-            <div className="font-bold text-base text-gray-800">{dayTotal}</div>
+            <div className={`font-bold text-base ${getCalorieColor()}`}>{dayTotal}</div>
             <div className="text-gray-400">千卡</div>
           </div>
           <div className="bg-white rounded-lg p-2">
-            <div className="font-bold text-base text-gray-800">{dayProtein.toFixed(0)}</div>
+            <div className={`font-bold text-base ${getProteinColor()}`}>{dayProtein.toFixed(0)}</div>
             <div className="text-gray-400">蛋白质g</div>
           </div>
           <div className="bg-white rounded-lg p-2">
@@ -279,11 +369,29 @@ export default function Calories() {
           </div>
         </div>
 
-        <div className="flex justify-between text-sm text-gray-600 border-t pt-3">
-          <span>TDEE: {tdee} kcal</span>
-          <span className={dayTotal <= tdee ? 'text-green-600' : 'text-red-500'}>
-            缺口: {tdee - dayTotal} kcal
-          </span>
+        {/* TDEE / Target / Deficit / Can still eat */}
+        <div className="grid grid-cols-4 gap-2 text-center text-xs border-t pt-3">
+          <div>
+            <div className="text-gray-400 mb-1">TDEE</div>
+            <div className="font-bold text-sm text-gray-800">{tdee}</div>
+          </div>
+          <div>
+            <div className="text-gray-400 mb-1">目标热量</div>
+            <button
+              onClick={() => { setEditTargetValue(String(calorieTargetFactor)); setShowTargetEditor(true); }}
+              className="font-bold text-sm text-green-600 underline underline-offset-2"
+            >
+              {targetCalories}
+            </button>
+          </div>
+          <div>
+            <div className="text-gray-400 mb-1">缺口</div>
+            <div className={`font-bold text-sm ${deficit >= 0 ? 'text-green-600' : 'text-red-500'}`}>{deficit}</div>
+          </div>
+          <div>
+            <div className="text-gray-400 mb-1">还能吃</div>
+            <div className={`font-bold text-sm ${canStillEat >= 0 ? 'text-green-600' : 'text-red-500'}`}>{canStillEat}</div>
+          </div>
         </div>
       </div>
 
@@ -324,6 +432,59 @@ export default function Calories() {
         />
       )}
 
+      {/* Target Factor Editor Modal */}
+      {showTargetEditor && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowTargetEditor(false)}>
+          <div className="bg-white rounded-2xl p-5 w-[90%] max-w-[400px] max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">目标热量</h3>
+              <button onClick={() => setShowTargetEditor(false)} className="text-gray-400 text-xl">&times;</button>
+            </div>
+
+            <div className="text-sm text-gray-500 mb-3">TDEE: {tdee} kcal</div>
+
+            <label className="text-xs text-gray-400 mb-1 block">目标系数</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editTargetValue}
+              onChange={e => setEditTargetValue(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-green-500"
+            />
+
+            <div className="space-y-1 mb-4">
+              {[
+                { val: 0.8, label: '0.8 轻度减脂' },
+                { val: 0.7, label: '0.7 中度减脂' },
+                { val: 0.6, label: '0.6 高度减脂' },
+                { val: 0.15, label: '0.15 液断' },
+              ].map(opt => (
+                <button
+                  key={opt.val}
+                  onClick={() => setEditTargetValue(String(opt.val))}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
+                    editTargetValue === String(opt.val) ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-600'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="text-center text-xs text-gray-400 mb-3">
+              目标热量 = {tdee} × {editTargetValue} = {Math.round(tdee * (parseFloat(editTargetValue) || 0.8))} kcal
+            </div>
+
+            <button
+              onClick={handleSaveTargetFactor}
+              className="w-full py-3 rounded-lg bg-green-500 text-white font-medium"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {editingRecord && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setEditingRecord(null)}>
@@ -333,12 +494,10 @@ export default function Calories() {
               <button onClick={() => setEditingRecord(null)} className="text-gray-400 text-xl">&times;</button>
             </div>
 
-            {/* Food name (read only) */}
             <div className="bg-gray-50 rounded-lg px-3 py-2 mb-3">
               <span className="text-sm font-medium text-gray-700">{editingRecord.food_name}</span>
             </div>
 
-            {/* Weight input */}
             <label className="text-xs text-gray-400 mb-1 block">重量 (g)</label>
             <input
               type="number"
@@ -347,7 +506,6 @@ export default function Calories() {
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-green-500"
             />
 
-            {/* Meal selection */}
             <label className="text-xs text-gray-400 mb-1 block">餐段</label>
             <div className="flex gap-2 mb-4">
               {(['breakfast', 'lunch', 'dinner'] as const).map(m => (
@@ -363,7 +521,6 @@ export default function Calories() {
               ))}
             </div>
 
-            {/* Nutrition preview */}
             {editPreview && (
               <div className="grid grid-cols-4 gap-2 text-center text-xs text-gray-600 mb-4">
                 <div className="bg-gray-50 rounded-lg p-2">
@@ -385,7 +542,6 @@ export default function Calories() {
               </div>
             )}
 
-            {/* Buttons */}
             <div className="flex gap-2">
               <button
                 onClick={handleEditSave}

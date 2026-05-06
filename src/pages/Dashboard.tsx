@@ -26,7 +26,9 @@ export default function Dashboard() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [weights, setWeights] = useState<WeightRecord[]>([]);
   const [todayCalories, setTodayCalories] = useState(0);
+  const [todayProtein, setTodayProtein] = useState(0);
   const [measurements, setMeasurements] = useState<Record<string, number>>({});
+  const [calorieTargetFactor, setCalorieTargetFactor] = useState(0.8);
   const [showWeightModal, setShowWeightModal] = useState(false);
   const [activityFactor, setActivityFactor] = useState(1.2);
   const [showActivityEditor, setShowActivityEditor] = useState(false);
@@ -52,7 +54,7 @@ export default function Dashboard() {
     const sevenDaysAgo = format(subDays(new Date(), 7), 'yyyy-MM-dd');
     const { data: weightData } = await supabase
       .from('light_weight_records')
-      .select('date, morning_weight, evening_weight, activity_factor')
+      .select('date, morning_weight, evening_weight, activity_factor, calorie_target_factor, is_fasting_day')
       .eq('user_id', userId)
       .gte('date', sevenDaysAgo)
       .order('date', { ascending: true });
@@ -80,18 +82,31 @@ export default function Dashboard() {
           setEditActivityValue(String(recentAF.activity_factor));
         }
       }
+
+      // Calorie target factor
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const todayRec = weightData.find(w => w.date === todayStr);
+      if (todayRec?.calorie_target_factor != null) {
+        setCalorieTargetFactor(todayRec.calorie_target_factor);
+      } else if (todayRec?.is_fasting_day) {
+        setCalorieTargetFactor(0.15);
+      } else {
+        const recentNF = weightData.find(w => !w.is_fasting_day && w.calorie_target_factor != null);
+        setCalorieTargetFactor(recentNF?.calorie_target_factor ?? 0.8);
+      }
     }
 
-    // Today's calories
+    // Today's calories and protein
     const today = format(new Date(), 'yyyy-MM-dd');
     const { data: foodData } = await supabase
       .from('light_food_log')
-      .select('calories')
+      .select('calories, protein')
       .eq('user_id', userId)
       .eq('date', today);
 
     if (foodData) {
       setTodayCalories(foodData.reduce((sum, f) => sum + (f.calories || 0), 0));
+      setTodayProtein(foodData.reduce((sum, f) => sum + (f.protein || 0), 0));
     }
 
     // Latest measurements
@@ -131,7 +146,19 @@ export default function Dashboard() {
     ? 655.1 + 9.563 * currentWeight + 1.85 * profile.height_cm - 4.676 * profile.age
     : 66.47 + 13.75 * currentWeight + 5.003 * profile.height_cm - 6.755 * profile.age;
   const tdee = Math.round(bmr * activityFactor);
+  const targetCalories = Math.round(tdee * calorieTargetFactor);
   const deficit = tdee - todayCalories;
+  const proteinTarget = Math.round(currentWeight * 1.2);
+
+  const calColor = targetCalories === 0 ? 'text-gray-800'
+    : todayCalories / targetCalories > 1 ? 'text-red-500'
+    : todayCalories / targetCalories >= 0.8 ? 'text-orange-500'
+    : 'text-blue-500';
+
+  const protColor = proteinTarget === 0 ? 'text-gray-800'
+    : todayProtein / proteinTarget >= 1 ? 'text-blue-500'
+    : todayProtein / proteinTarget >= 0.6 ? 'text-orange-500'
+    : 'text-red-500';
 
   const handleSaveActivityFactor = async () => {
     const val = parseFloat(editActivityValue);
@@ -218,18 +245,22 @@ export default function Dashboard() {
       {/* Today's calories */}
       <div className="mb-6 bg-gray-50 rounded-xl p-4">
         <h3 className="text-sm font-medium text-gray-600 mb-3">今日热量</h3>
-        <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="grid grid-cols-4 gap-2 text-center">
           <div>
-            <div className="text-xl font-bold text-gray-800">{todayCalories}</div>
-            <div className="text-xs text-gray-400">摄入 kcal</div>
+            <div className="text-xs text-gray-400 mb-1">摄入</div>
+            <div className={`text-lg font-bold ${calColor}`}>{todayCalories}</div>
           </div>
           <div>
-            <div className="text-xl font-bold text-gray-800">{tdee}</div>
-            <div className="text-xs text-gray-400">TDEE</div>
+            <div className="text-xs text-gray-400 mb-1">蛋白质</div>
+            <div className={`text-lg font-bold ${protColor}`}>{todayProtein.toFixed(0)}g</div>
           </div>
           <div>
-            <div className={`text-xl font-bold ${deficit > 0 ? 'text-green-600' : 'text-red-500'}`}>{deficit}</div>
-            <div className="text-xs text-gray-400">缺口 kcal</div>
+            <div className="text-xs text-gray-400 mb-1">TDEE</div>
+            <div className="text-lg font-bold text-gray-800">{tdee}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-400 mb-1">缺口</div>
+            <div className={`text-lg font-bold ${deficit >= 0 ? 'text-green-600' : 'text-red-500'}`}>{deficit}</div>
           </div>
         </div>
         <div className="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-gray-200">
