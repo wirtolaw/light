@@ -18,6 +18,7 @@ interface WeightRecord {
   date: string;
   morning_weight: number | null;
   evening_weight: number | null;
+  activity_factor: number | null;
 }
 
 export default function Dashboard() {
@@ -26,6 +27,9 @@ export default function Dashboard() {
   const [todayCalories, setTodayCalories] = useState(0);
   const [measurements, setMeasurements] = useState<Record<string, number>>({});
   const [showWeightModal, setShowWeightModal] = useState(false);
+  const [activityFactor, setActivityFactor] = useState(1.2);
+  const [showActivityEditor, setShowActivityEditor] = useState(false);
+  const [editActivityValue, setEditActivityValue] = useState('1.2');
 
   const userId = getUserId();
 
@@ -46,12 +50,35 @@ export default function Dashboard() {
     const sevenDaysAgo = format(subDays(new Date(), 7), 'yyyy-MM-dd');
     const { data: weightData } = await supabase
       .from('light_weight_records')
-      .select('date, morning_weight, evening_weight')
+      .select('date, morning_weight, evening_weight, activity_factor')
       .eq('user_id', userId)
       .gte('date', sevenDaysAgo)
       .order('date', { ascending: true });
 
-    if (weightData) setWeights(weightData);
+    if (weightData) {
+      setWeights(weightData);
+      // Find today's activity factor, or inherit from most recent day
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const todayRecord = weightData.find(w => w.date === today);
+      if (todayRecord?.activity_factor) {
+        setActivityFactor(todayRecord.activity_factor);
+        setEditActivityValue(String(todayRecord.activity_factor));
+      } else {
+        // Get most recent activity factor from any record
+        const { data: recentAF } = await supabase
+          .from('light_weight_records')
+          .select('activity_factor')
+          .eq('user_id', userId)
+          .not('activity_factor', 'is', null)
+          .order('date', { ascending: false })
+          .limit(1)
+          .single();
+        if (recentAF?.activity_factor) {
+          setActivityFactor(recentAF.activity_factor);
+          setEditActivityValue(String(recentAF.activity_factor));
+        }
+      }
+    }
 
     // Today's calories
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -101,8 +128,35 @@ export default function Dashboard() {
   const bmr = profile.gender === 'female'
     ? 655.1 + 9.563 * currentWeight + 1.85 * profile.height_cm - 4.676 * profile.age
     : 66.47 + 13.75 * currentWeight + 5.003 * profile.height_cm - 6.755 * profile.age;
-  const tdee = Math.round(bmr * 1.2);
+  const tdee = Math.round(bmr * activityFactor);
   const deficit = tdee - todayCalories;
+
+  const handleSaveActivityFactor = async () => {
+    const val = parseFloat(editActivityValue);
+    if (!val || val < 1 || val > 3) return;
+    setActivityFactor(val);
+    setShowActivityEditor(false);
+
+    const today = format(new Date(), 'yyyy-MM-dd');
+    // Upsert: update if today's weight record exists, otherwise insert a record just for activity_factor
+    const { data: existing } = await supabase
+      .from('light_weight_records')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .limit(1)
+      .single();
+
+    if (existing) {
+      await supabase.from('light_weight_records').update({ activity_factor: val }).eq('id', existing.id);
+    } else {
+      await supabase.from('light_weight_records').insert({
+        user_id: userId,
+        date: today,
+        activity_factor: val,
+      });
+    }
+  };
 
   // Chart data
   const chartData = weights
@@ -185,7 +239,66 @@ export default function Dashboard() {
             <div className="text-xs text-gray-400">缺口 kcal</div>
           </div>
         </div>
+        <div className="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-gray-200">
+          BMR {Math.round(bmr)} ×{' '}
+          <button
+            onClick={() => { setEditActivityValue(String(activityFactor)); setShowActivityEditor(true); }}
+            className="text-green-600 underline underline-offset-2"
+          >
+            活动系数 {activityFactor}
+          </button>
+        </div>
       </div>
+
+      {/* Activity factor editor */}
+      {showActivityEditor && (
+        <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
+          <div className="bg-white rounded-t-2xl p-5 w-full max-w-[430px]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">活动系数</h3>
+              <button onClick={() => setShowActivityEditor(false)} className="text-gray-400 text-xl">&times;</button>
+            </div>
+
+            <input
+              type="number"
+              step="0.01"
+              value={editActivityValue}
+              onChange={e => setEditActivityValue(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-green-500"
+            />
+
+            <div className="space-y-1 mb-4">
+              {[
+                { val: 1.2, label: '1.2 久坐' },
+                { val: 1.375, label: '1.375 轻度运动（每周1-3次）' },
+                { val: 1.55, label: '1.55 中度运动（每周3-5次）' },
+                { val: 1.725, label: '1.725 高强度运动（每周6-7次）' },
+              ].map(opt => (
+                <button
+                  key={opt.val}
+                  onClick={() => setEditActivityValue(String(opt.val))}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
+                    editActivityValue === String(opt.val) ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-600'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="text-center text-xs text-gray-400 mb-3">
+              TDEE = {Math.round(bmr)} × {editActivityValue} = {Math.round(bmr * (parseFloat(editActivityValue) || 1.2))} kcal
+            </div>
+
+            <button
+              onClick={handleSaveActivityFactor}
+              className="w-full py-3 rounded-lg bg-green-500 text-white font-medium"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Measurements */}
       {Object.keys(measurements).length > 0 && (

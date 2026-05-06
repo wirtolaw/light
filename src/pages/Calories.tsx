@@ -39,6 +39,7 @@ export default function Calories() {
   const [editSaving, setEditSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [customFoods, setCustomFoods] = useState<FoodItem[]>([]);
+  const [activityFactor, setActivityFactor] = useState(1.2);
 
   const userId = getUserId();
 
@@ -68,16 +69,22 @@ export default function Calories() {
 
     if (profileData) setProfile(profileData);
 
-    // Get latest weight
+    // Get latest weight and activity factor for selected date
     const { data: weightData } = await supabase
       .from('light_weight_records')
-      .select('morning_weight')
+      .select('morning_weight, activity_factor, date')
       .eq('user_id', userId)
       .order('date', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(10);
 
-    if (weightData?.morning_weight) setCurrentWeight(weightData.morning_weight);
+    if (weightData && weightData.length > 0) {
+      const latestWithWeight = weightData.find(w => w.morning_weight);
+      if (latestWithWeight) setCurrentWeight(latestWithWeight.morning_weight);
+      // Find activity factor: prefer selected date, fallback to most recent
+      const selectedAF = weightData.find(w => w.date === selectedDate && w.activity_factor);
+      const recentAF = weightData.find(w => w.activity_factor);
+      setActivityFactor(selectedAF?.activity_factor || recentAF?.activity_factor || 1.2);
+    }
 
     // Load custom foods
     const { data: customData } = await supabase
@@ -96,7 +103,7 @@ export default function Calories() {
     }
   };
 
-  useEffect(() => { loadData(); }, [currentMonth]);
+  useEffect(() => { loadData(); }, [currentMonth, selectedDate]);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -123,7 +130,7 @@ export default function Calories() {
       ? 655.1 + 9.563 * weight + 1.85 * profile.height_cm - 4.676 * profile.age
       : 66.47 + 13.75 * weight + 5.003 * profile.height_cm - 6.755 * profile.age)
     : 1400;
-  const tdee = Math.round(bmr * 1.2);
+  const tdee = Math.round(bmr * activityFactor);
 
   const mealLabels: Record<string, string> = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
 
