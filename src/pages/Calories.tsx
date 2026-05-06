@@ -183,7 +183,7 @@ export default function Calories() {
     if (targetCalories === 0) return 'text-gray-800';
     const ratio = dayTotal / targetCalories;
     if (ratio > 1) return 'text-red-500';
-    if (ratio >= 0.8) return 'text-orange-500';
+    if (ratio >= 0.8) return 'text-yellow-500';
     return 'text-blue-500';
   };
 

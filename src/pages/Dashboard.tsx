@@ -152,7 +152,7 @@ export default function Dashboard() {
 
   const calColor = targetCalories === 0 ? 'text-gray-800'
     : todayCalories / targetCalories > 1 ? 'text-red-500'
-    : todayCalories / targetCalories >= 0.8 ? 'text-orange-500'
+    : todayCalories / targetCalories >= 0.8 ? 'text-yellow-500'
     : 'text-blue-500';
 
   const protColor = proteinTarget === 0 ? 'text-gray-800'
