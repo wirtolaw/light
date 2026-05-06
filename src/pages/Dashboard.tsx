@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase, getUserId } from '../lib/supabase';
 import { format, subDays, differenceInDays } from 'date-fns';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
@@ -30,6 +31,7 @@ export default function Dashboard() {
   const [activityFactor, setActivityFactor] = useState(1.2);
   const [showActivityEditor, setShowActivityEditor] = useState(false);
   const [editActivityValue, setEditActivityValue] = useState('1.2');
+  const navigate = useNavigate();
 
   const userId = getUserId();
 
@@ -166,15 +168,6 @@ export default function Dashboard() {
       weight: w.morning_weight,
     }));
 
-  const measurementLabels: Record<string, string> = {
-    waist: '腰围',
-    upper_chest: '上胸围',
-    lower_chest: '下胸围',
-    hips: '臀围',
-    bicep: '臂围',
-    thigh: '大腿围',
-    calf: '小腿围',
-  };
 
   return (
     <div className="px-4 pb-20 pt-6">
@@ -187,7 +180,7 @@ export default function Dashboard() {
           <div className="text-5xl font-bold text-gray-800">{currentWeight.toFixed(1)}</div>
           <div className="text-sm text-gray-400 mt-1">kg &middot; 点击记录</div>
         </button>
-        <div className="text-sm text-gray-500 mt-2">BMI {bmi.toFixed(1)}</div>
+        <div className="text-sm text-gray-500 mt-2">BMI {bmi.toFixed(1)} {bmi < 18.5 ? '偏瘦' : bmi < 24 ? '正常' : bmi < 28 ? '偏胖' : '肥胖'}</div>
       </div>
 
       {/* Progress bar */}
@@ -300,24 +293,38 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Measurements */}
-      {Object.keys(measurements).length > 0 && (
-        <div className="mb-6 bg-gray-50 rounded-xl p-4">
-          <h3 className="text-sm font-medium text-gray-600 mb-3">最新围度</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {Object.entries(measurements).map(([type, value]) => (
-              <div key={type} className="flex justify-between text-sm px-2">
-                <span className="text-gray-500">{measurementLabels[type] || type}</span>
-                <span className="font-medium">{value} cm</span>
-              </div>
-            ))}
+      {/* Measurements summary */}
+      <button
+        onClick={() => navigate('/measurements')}
+        className="w-full mb-6 bg-gray-50 rounded-xl p-4 text-left active:bg-gray-100"
+      >
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-sm font-medium text-gray-600">围度</h3>
+          <span className="text-xs text-gray-400">&gt;</span>
+        </div>
+        <div className="grid grid-cols-2 gap-y-2 gap-x-4">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">腰围</span>
+            <span className="font-medium">{measurements.waist ? `${measurements.waist} cm` : '--'}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">臀围</span>
+            <span className="font-medium">{measurements.hips ? `${measurements.hips} cm` : '--'}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">腰臀比</span>
+            <span className="font-medium">{measurements.waist && measurements.hips ? (measurements.waist / measurements.hips).toFixed(2) : '--'}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">大腿围</span>
+            <span className="font-medium">{measurements.thigh ? `${measurements.thigh} cm` : '--'}</span>
           </div>
         </div>
-      )}
+      </button>
 
-      {/* Days remaining */}
-      <div className="text-center text-sm text-gray-500">
-        剩余 <span className="font-semibold text-gray-700">{daysRemaining}</span> 天
+      {/* Days progress */}
+      <div className="text-center text-base text-gray-500">
+        减重计划第 <span className="font-semibold text-gray-700">{daysElapsed + 1}</span> 天，剩余 <span className="font-semibold text-gray-700">{daysRemaining}</span> 天
       </div>
 
       {showWeightModal && (
