@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase, getUserId } from '../lib/supabase';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths } from 'date-fns';
 import FoodEntryModal from '../components/FoodEntryModal';
+import { builtInFoods } from '../lib/foods';
+import type { FoodItem } from '../lib/foods';
 
 interface FoodRecord {
   id: string;
@@ -14,6 +16,7 @@ interface FoodRecord {
   carbs: number;
   fat: number;
   time: string;
+  food_id?: string;
 }
 
 interface Profile {
@@ -30,6 +33,12 @@ export default function Calories() {
   const [showFoodModal, setShowFoodModal] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [currentWeight, setCurrentWeight] = useState<number | null>(null);
+  const [editingRecord, setEditingRecord] = useState<FoodRecord | null>(null);
+  const [editWeight, setEditWeight] = useState('');
+  const [editMeal, setEditMeal] = useState<'breakfast' | 'lunch' | 'dinner'>('lunch');
+  const [editSaving, setEditSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [customFoods, setCustomFoods] = useState<FoodItem[]>([]);
 
   const userId = getUserId();
 
@@ -69,6 +78,22 @@ export default function Calories() {
       .single();
 
     if (weightData?.morning_weight) setCurrentWeight(weightData.morning_weight);
+
+    // Load custom foods
+    const { data: customData } = await supabase
+      .from('light_food_database')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_custom', true);
+    if (customData) {
+      setCustomFoods(customData.map(d => ({
+        name: d.name,
+        calories_per_100g: d.calories_per_100g,
+        protein_per_100g: d.protein_per_100g,
+        carbs_per_100g: d.carbs_per_100g,
+        fat_per_100g: d.fat_per_100g,
+      })));
+    }
   };
 
   useEffect(() => { loadData(); }, [currentMonth]);
@@ -102,10 +127,83 @@ export default function Calories() {
 
   const mealLabels: Record<string, string> = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
 
-  const handleDelete = async (id: string) => {
-    await supabase.from('light_food_log').delete().eq('id', id);
+  const allFoods = useMemo(() => [...builtInFoods, ...customFoods], [customFoods]);
+
+  const findFoodItem = (name: string): FoodItem | null => {
+    return allFoods.find(f => f.name === name) || null;
+  };
+
+  const editFoodItem = editingRecord ? findFoodItem(editingRecord.food_name) : null;
+
+  const editCalculated = useMemo(() => {
+    if (!editFoodItem || !editWeight) return null;
+    const w = parseFloat(editWeight) / 100;
+    return {
+      calories: Math.round(editFoodItem.calories_per_100g * w),
+      protein: Math.round(editFoodItem.protein_per_100g * w * 10) / 10,
+      carbs: Math.round(editFoodItem.carbs_per_100g * w * 10) / 10,
+      fat: Math.round(editFoodItem.fat_per_100g * w * 10) / 10,
+    };
+  }, [editFoodItem, editWeight]);
+
+  const openEdit = (record: FoodRecord) => {
+    setEditingRecord(record);
+    setEditWeight(String(record.weight_g));
+    setEditMeal(record.meal as 'breakfast' | 'lunch' | 'dinner');
+    setShowDeleteConfirm(false);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingRecord) return;
+    setEditSaving(true);
+
+    const updates: Record<string, unknown> = {
+      meal: editMeal,
+      weight_g: parseFloat(editWeight) || 0,
+    };
+
+    if (editCalculated) {
+      updates.calories = editCalculated.calories;
+      updates.protein = editCalculated.protein;
+      updates.carbs = editCalculated.carbs;
+      updates.fat = editCalculated.fat;
+    } else {
+      // No food item found in database, scale proportionally from original
+      const ratio = (parseFloat(editWeight) || 0) / (editingRecord.weight_g || 1);
+      updates.calories = Math.round(editingRecord.calories * ratio);
+      updates.protein = Math.round(editingRecord.protein * ratio * 10) / 10;
+      updates.carbs = Math.round(editingRecord.carbs * ratio * 10) / 10;
+      updates.fat = Math.round(editingRecord.fat * ratio * 10) / 10;
+    }
+
+    await supabase.from('light_food_log').update(updates).eq('id', editingRecord.id);
+    setEditingRecord(null);
+    setEditSaving(false);
     loadData();
   };
+
+  const handleEditDelete = async () => {
+    if (!editingRecord) return;
+    setEditSaving(true);
+    await supabase.from('light_food_log').delete().eq('id', editingRecord.id);
+    setEditingRecord(null);
+    setEditSaving(false);
+    setShowDeleteConfirm(false);
+    loadData();
+  };
+
+  // Preview values for edit modal (use calculated if food found, else scale proportionally)
+  const editPreview = useMemo(() => {
+    if (!editingRecord) return null;
+    if (editCalculated) return editCalculated;
+    const ratio = (parseFloat(editWeight) || 0) / (editingRecord.weight_g || 1);
+    return {
+      calories: Math.round(editingRecord.calories * ratio),
+      protein: Math.round(editingRecord.protein * ratio * 10) / 10,
+      carbs: Math.round(editingRecord.carbs * ratio * 10) / 10,
+      fat: Math.round(editingRecord.fat * ratio * 10) / 10,
+    };
+  }, [editingRecord, editCalculated, editWeight]);
 
   return (
     <div className="px-4 pb-20 pt-6">
@@ -194,33 +292,130 @@ export default function Calories() {
             <h4 className="text-xs font-medium text-gray-500 mb-1">{mealLabels[meal]}</h4>
             <div className="space-y-1">
               {mealRecords.map(r => (
-                <div key={r.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
-                  <div>
+                <button
+                  key={r.id}
+                  onClick={() => openEdit(r)}
+                  className="w-full text-left bg-gray-50 rounded-lg px-3 py-2 active:bg-gray-100"
+                >
+                  <div className="flex items-center justify-between text-sm">
                     <span className="font-medium">{r.food_name}</span>
-                    <span className="text-gray-400 ml-2">{r.weight_g}g</span>
+                    <span className="text-gray-400">{r.weight_g}g</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-600">{r.calories} kcal</span>
-                    <button
-                      onClick={() => handleDelete(r.id)}
-                      className="text-red-300 text-xs"
-                    >
-                      删除
-                    </button>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {r.calories} kcal · 蛋白质 {(r.protein || 0).toFixed(1)}g · 碳水 {(r.carbs || 0).toFixed(1)}g · 脂肪 {(r.fat || 0).toFixed(1)}g
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
         );
       })}
 
+      {/* Food Entry Modal */}
       {showFoodModal && (
         <FoodEntryModal
           date={selectedDate}
           onClose={() => setShowFoodModal(false)}
           onSaved={loadData}
         />
+      )}
+
+      {/* Edit Modal */}
+      {editingRecord && (
+        <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
+          <div className="bg-white rounded-t-2xl p-5 w-full max-w-[430px]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">编辑食物</h3>
+              <button onClick={() => setEditingRecord(null)} className="text-gray-400 text-xl">&times;</button>
+            </div>
+
+            {/* Food name (read only) */}
+            <div className="bg-gray-50 rounded-lg px-3 py-2 mb-3">
+              <span className="text-sm font-medium text-gray-700">{editingRecord.food_name}</span>
+            </div>
+
+            {/* Weight input */}
+            <label className="text-xs text-gray-400 mb-1 block">重量 (g)</label>
+            <input
+              type="number"
+              value={editWeight}
+              onChange={e => setEditWeight(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-green-500"
+            />
+
+            {/* Meal selection */}
+            <label className="text-xs text-gray-400 mb-1 block">餐段</label>
+            <div className="flex gap-2 mb-4">
+              {(['breakfast', 'lunch', 'dinner'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setEditMeal(m)}
+                  className={`flex-1 py-1.5 rounded-lg text-sm ${
+                    editMeal === m ? 'bg-green-100 text-green-700 font-medium' : 'bg-gray-100 text-gray-500'
+                  }`}
+                >
+                  {mealLabels[m]}
+                </button>
+              ))}
+            </div>
+
+            {/* Nutrition preview */}
+            {editPreview && (
+              <div className="grid grid-cols-4 gap-2 text-center text-xs text-gray-600 mb-4">
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="font-semibold text-sm text-gray-800">{editPreview.calories}</div>
+                  <div>千卡</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="font-semibold text-sm text-gray-800">{editPreview.protein}</div>
+                  <div>蛋白质</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="font-semibold text-sm text-gray-800">{editPreview.carbs}</div>
+                  <div>碳水</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="font-semibold text-sm text-gray-800">{editPreview.fat}</div>
+                  <div>脂肪</div>
+                </div>
+              </div>
+            )}
+
+            {/* Buttons */}
+            <button
+              onClick={handleEditSave}
+              disabled={editSaving}
+              className="w-full py-3 rounded-lg bg-green-500 text-white font-medium disabled:opacity-50 mb-2"
+            >
+              {editSaving ? '保存中...' : '保存'}
+            </button>
+
+            {!showDeleteConfirm ? (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="w-full py-2 text-red-400 text-sm"
+              >
+                删除
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-2 text-gray-400 text-sm bg-gray-50 rounded-lg"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleEditDelete}
+                  disabled={editSaving}
+                  className="flex-1 py-2 text-white text-sm bg-red-500 rounded-lg disabled:opacity-50"
+                >
+                  确认删除
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
