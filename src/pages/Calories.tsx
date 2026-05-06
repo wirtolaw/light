@@ -37,7 +37,6 @@ export default function Calories() {
   const [editWeight, setEditWeight] = useState('');
   const [editMeal, setEditMeal] = useState<'breakfast' | 'lunch' | 'dinner'>('lunch');
   const [editSaving, setEditSaving] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [customFoods, setCustomFoods] = useState<FoodItem[]>([]);
   const [activityFactor, setActivityFactor] = useState(1.2);
 
@@ -157,7 +156,6 @@ export default function Calories() {
     setEditingRecord(record);
     setEditWeight(String(record.weight_g));
     setEditMeal(record.meal as 'breakfast' | 'lunch' | 'dinner');
-    setShowDeleteConfirm(false);
   };
 
   const handleEditSave = async () => {
@@ -195,7 +193,6 @@ export default function Calories() {
     await supabase.from('light_food_log').delete().eq('id', editingRecord.id);
     setEditingRecord(null);
     setEditSaving(false);
-    setShowDeleteConfirm(false);
     loadData();
   };
 
@@ -389,38 +386,24 @@ export default function Calories() {
             )}
 
             {/* Buttons */}
-            <button
-              onClick={handleEditSave}
-              disabled={editSaving}
-              className="w-full py-3 rounded-lg bg-green-500 text-white font-medium disabled:opacity-50 mb-2"
-            >
-              {editSaving ? '保存中...' : '保存'}
-            </button>
-
-            {!showDeleteConfirm ? (
+            <div className="flex gap-2">
               <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="w-full py-2 text-red-400 text-sm"
+                onClick={handleEditSave}
+                disabled={editSaving}
+                className="flex-1 py-3 rounded-lg bg-green-500 text-white font-medium disabled:opacity-50"
+              >
+                {editSaving ? '保存中...' : '保存'}
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm('确定删除这条记录？')) handleEditDelete();
+                }}
+                disabled={editSaving}
+                className="flex-1 py-3 rounded-lg bg-red-500 text-white font-medium disabled:opacity-50"
               >
                 删除
               </button>
-            ) : (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 py-2 text-gray-400 text-sm bg-gray-50 rounded-lg"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleEditDelete}
-                  disabled={editSaving}
-                  className="flex-1 py-2 text-white text-sm bg-red-500 rounded-lg disabled:opacity-50"
-                >
-                  确认删除
-                </button>
-              </div>
-            )}
+            </div>
           </div>
         </div>
       )}
