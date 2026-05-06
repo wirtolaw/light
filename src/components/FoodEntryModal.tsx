@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { supabase, getUserId } from '../lib/supabase';
 import { builtInFoods } from '../lib/foods';
 import type { FoodItem } from '../lib/foods';
@@ -24,11 +24,36 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
   const [manualCarbs, setManualCarbs] = useState('');
   const [manualFat, setManualFat] = useState('');
   const [saving, setSaving] = useState(false);
+  const [customFoods, setCustomFoods] = useState<FoodItem[]>([]);
+  const [saveSuccess, setSaveSuccess] = useState('');
+
+  useEffect(() => {
+    const userId = getUserId();
+    if (!userId) return;
+    supabase
+      .from('light_food_database')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_custom', true)
+      .then(({ data }) => {
+        if (data) {
+          setCustomFoods(data.map(d => ({
+            name: d.name,
+            calories_per_100g: d.calories_per_100g,
+            protein_per_100g: d.protein_per_100g,
+            carbs_per_100g: d.carbs_per_100g,
+            fat_per_100g: d.fat_per_100g,
+          })));
+        }
+      });
+  }, []);
+
+  const allFoods = useMemo(() => [...builtInFoods, ...customFoods], [customFoods]);
 
   const filteredFoods = useMemo(() => {
-    if (!search) return builtInFoods.slice(0, 20);
-    return builtInFoods.filter(f => f.name.includes(search));
-  }, [search]);
+    if (!search) return allFoods.slice(0, 20);
+    return allFoods.filter(f => f.name.includes(search));
+  }, [search, allFoods]);
 
   const calculated = useMemo(() => {
     if (!selectedFood || !weightG) return null;
@@ -41,51 +66,62 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
     };
   }, [selectedFood, weightG]);
 
-  const handleSave = async () => {
+  const handleAddToLog = async () => {
     const userId = getUserId();
-    if (!userId) return;
+    if (!userId || !selectedFood || !calculated) return;
     setSaving(true);
-
-    let foodName: string;
-    let calories: number;
-    let protein: number;
-    let carbs: number;
-    let fat: number;
-    let weight_g: number;
-
-    if (manualMode) {
-      foodName = manualName;
-      calories = parseFloat(manualCalories) || 0;
-      protein = parseFloat(manualProtein) || 0;
-      carbs = parseFloat(manualCarbs) || 0;
-      fat = parseFloat(manualFat) || 0;
-      weight_g = parseFloat(weightG) || 0;
-    } else {
-      if (!selectedFood || !calculated) { setSaving(false); return; }
-      foodName = selectedFood.name;
-      calories = calculated.calories;
-      protein = calculated.protein;
-      carbs = calculated.carbs;
-      fat = calculated.fat;
-      weight_g = parseFloat(weightG) || 0;
-    }
 
     await supabase.from('light_food_log').insert({
       user_id: userId,
       date: today,
       meal,
       time: format(new Date(), 'HH:mm'),
-      food_name: foodName,
-      weight_g,
-      calories,
-      protein,
-      carbs,
-      fat,
+      food_name: selectedFood.name,
+      weight_g: parseFloat(weightG) || 0,
+      calories: calculated.calories,
+      protein: calculated.protein,
+      carbs: calculated.carbs,
+      fat: calculated.fat,
     });
 
     setSaving(false);
     onSaved();
     onClose();
+  };
+
+  const handleSaveToFoodDB = async () => {
+    const userId = getUserId();
+    if (!userId || !manualName) return;
+    setSaving(true);
+
+    const { error } = await supabase.from('light_food_database').insert({
+      user_id: userId,
+      name: manualName,
+      calories_per_100g: parseFloat(manualCalories) || 0,
+      protein_per_100g: parseFloat(manualProtein) || 0,
+      carbs_per_100g: parseFloat(manualCarbs) || 0,
+      fat_per_100g: parseFloat(manualFat) || 0,
+      is_custom: true,
+    });
+
+    if (!error) {
+      setCustomFoods(prev => [...prev, {
+        name: manualName,
+        calories_per_100g: parseFloat(manualCalories) || 0,
+        protein_per_100g: parseFloat(manualProtein) || 0,
+        carbs_per_100g: parseFloat(manualCarbs) || 0,
+        fat_per_100g: parseFloat(manualFat) || 0,
+      }]);
+      setSaveSuccess(`"${manualName}" 已保存到食物库，可在搜索食物中找到`);
+      setManualName('');
+      setManualCalories('');
+      setManualProtein('');
+      setManualCarbs('');
+      setManualFat('');
+      setTimeout(() => setSaveSuccess(''), 3000);
+    }
+
+    setSaving(false);
   };
 
   const mealLabels = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
@@ -133,6 +169,7 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
 
         {manualMode ? (
           <div className="space-y-3 mb-4">
+            <p className="text-xs text-gray-400">添加新食材到食物库（每100g营养数据），保存后可在"搜索食物"中使用</p>
             <input
               placeholder="食物名称"
               value={manualName}
@@ -141,14 +178,7 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
             />
             <input
               type="number"
-              placeholder="重量 (g)"
-              value={weightG}
-              onChange={e => setWeightG(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500"
-            />
-            <input
-              type="number"
-              placeholder="热量 (kcal)"
+              placeholder="热量 (kcal/100g)"
               value={manualCalories}
               onChange={e => setManualCalories(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500"
@@ -156,26 +186,36 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
             <div className="grid grid-cols-3 gap-2">
               <input
                 type="number"
-                placeholder="蛋白质(g)"
+                placeholder="蛋白质(g/100g)"
                 value={manualProtein}
                 onChange={e => setManualProtein(e.target.value)}
                 className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-green-500"
               />
               <input
                 type="number"
-                placeholder="碳水(g)"
+                placeholder="碳水(g/100g)"
                 value={manualCarbs}
                 onChange={e => setManualCarbs(e.target.value)}
                 className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-green-500"
               />
               <input
                 type="number"
-                placeholder="脂肪(g)"
+                placeholder="脂肪(g/100g)"
                 value={manualFat}
                 onChange={e => setManualFat(e.target.value)}
                 className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-green-500"
               />
             </div>
+            {saveSuccess && (
+              <div className="text-xs text-green-600 bg-green-50 rounded-lg px-3 py-2">{saveSuccess}</div>
+            )}
+            <button
+              onClick={handleSaveToFoodDB}
+              disabled={saving || !manualName || !manualCalories}
+              className="w-full py-3 rounded-lg bg-blue-500 text-white font-medium disabled:opacity-50"
+            >
+              {saving ? '保存中...' : '保存到食物库'}
+            </button>
           </div>
         ) : (
           <>
@@ -223,37 +263,39 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-green-500"
                 />
                 {calculated && (
-                  <div className="grid grid-cols-4 gap-2 text-center text-xs text-gray-600">
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <div className="font-semibold text-sm text-gray-800">{calculated.calories}</div>
-                      <div>千卡</div>
+                  <>
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs text-gray-600 mb-4">
+                      <div className="bg-gray-50 rounded-lg p-2">
+                        <div className="font-semibold text-sm text-gray-800">{calculated.calories}</div>
+                        <div>千卡</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-2">
+                        <div className="font-semibold text-sm text-gray-800">{calculated.protein}</div>
+                        <div>蛋白质</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-2">
+                        <div className="font-semibold text-sm text-gray-800">{calculated.carbs}</div>
+                        <div>碳水</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-2">
+                        <div className="font-semibold text-sm text-gray-800">{calculated.fat}</div>
+                        <div>脂肪</div>
+                      </div>
                     </div>
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <div className="font-semibold text-sm text-gray-800">{calculated.protein}</div>
-                      <div>蛋白质</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <div className="font-semibold text-sm text-gray-800">{calculated.carbs}</div>
-                      <div>碳水</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <div className="font-semibold text-sm text-gray-800">{calculated.fat}</div>
-                      <div>脂肪</div>
-                    </div>
-                  </div>
+                    <button
+                      onClick={handleAddToLog}
+                      disabled={saving}
+                      className="w-full py-3 rounded-lg bg-green-500 text-white font-medium disabled:opacity-50"
+                    >
+                      {saving ? '添加中...' : '添加'}
+                    </button>
+                  </>
                 )}
               </div>
             )}
           </>
         )}
 
-        <button
-          onClick={handleSave}
-          disabled={saving || (manualMode ? !manualName : !selectedFood)}
-          className="w-full py-3 rounded-lg bg-green-500 text-white font-medium disabled:opacity-50"
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
       </div>
     </div>
   );
