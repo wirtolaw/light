@@ -191,7 +191,7 @@ export default function Calories() {
     if (proteinTarget === 0) return 'text-gray-800';
     const ratio = dayProtein / proteinTarget;
     if (ratio >= 1) return 'text-blue-500';
-    if (ratio >= 0.6) return 'text-orange-500';
+    if (ratio >= 0.6) return 'text-yellow-500';
     return 'text-red-500';
   };
 

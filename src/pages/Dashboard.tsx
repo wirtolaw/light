@@ -157,7 +157,7 @@ export default function Dashboard() {
 
   const protColor = proteinTarget === 0 ? 'text-gray-800'
     : todayProtein / proteinTarget >= 1 ? 'text-blue-500'
-    : todayProtein / proteinTarget >= 0.6 ? 'text-orange-500'
+    : todayProtein / proteinTarget >= 0.6 ? 'text-yellow-500'
     : 'text-red-500';
 
   const handleSaveActivityFactor = async () => {
