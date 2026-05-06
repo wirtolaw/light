@@ -147,7 +147,7 @@ export default function WeightCalendar() {
       </div>
 
       {/* Selected day details */}
-      {details && selectedDate && (
+      {selectedDate && (
         <div className="bg-gray-50 rounded-xl p-4 mb-4">
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-sm font-medium">{selectedDate}</h3>
@@ -158,34 +158,42 @@ export default function WeightCalendar() {
               记录
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-            <div className="flex justify-between">
-              <span className="text-gray-500">早晨</span>
-              <span className="font-medium">{details.rec.morning_weight ? `${details.rec.morning_weight} kg` : '-'}</span>
+          {details ? (
+            <>
+              <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">早晨</span>
+                  <span className="font-medium">{details.rec.morning_weight ? `${details.rec.morning_weight} kg` : '-'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">晚间</span>
+                  <span className="font-medium">{details.rec.evening_weight ? `${details.rec.evening_weight} kg` : '-'}</span>
+                </div>
+              </div>
+              <div className="border-t pt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">日变化</span>
+                  {formatChange(details.dailyChange)}
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">周变化</span>
+                  {formatChange(details.weeklyChange)}
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">月变化</span>
+                  {formatChange(details.monthlyChange)}
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">总变化</span>
+                  {formatChange(details.totalChange)}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-center text-sm text-gray-400 py-4">
+              暂无记录，点击右上角记录体重
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">晚间</span>
-              <span className="font-medium">{details.rec.evening_weight ? `${details.rec.evening_weight} kg` : '-'}</span>
-            </div>
-          </div>
-          <div className="border-t pt-3 grid grid-cols-2 gap-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">日变化</span>
-              {formatChange(details.dailyChange)}
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">周变化</span>
-              {formatChange(details.weeklyChange)}
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">月变化</span>
-              {formatChange(details.monthlyChange)}
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">总变化</span>
-              {formatChange(details.totalChange)}
-            </div>
-          </div>
+          )}
         </div>
       )}
 
