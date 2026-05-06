@@ -191,8 +191,8 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
   const mealLabels = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50">
-      <div className="bg-white rounded-t-2xl p-5 w-full max-w-[430px] max-h-[85vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-5 w-[90%] max-w-[400px] max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold">添加食物</h3>
           <button onClick={onClose} className="text-gray-400 text-xl">&times;</button>
