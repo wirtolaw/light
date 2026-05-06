@@ -26,6 +26,9 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
   const [saving, setSaving] = useState(false);
   const [customFoods, setCustomFoods] = useState<FoodItem[]>([]);
   const [saveSuccess, setSaveSuccess] = useState('');
+  const [showPasteArea, setShowPasteArea] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [parseMsg, setParseMsg] = useState('');
 
   useEffect(() => {
     const userId = getUserId();
@@ -124,6 +127,67 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
     setSaving(false);
   };
 
+  const parseNutritionText = (text: string) => {
+    setParseMsg('');
+    let filled = 0;
+
+    // Extract name: first line, strip trailing punctuation/separators
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (lines.length > 0) {
+      const nameLine = lines[0]
+        .replace(/[—–\-:：]+.*$/, '')  // strip everything after — or : on first line
+        .replace(/每\s*\d+\s*g.*$/i, '')
+        .trim();
+      if (nameLine && nameLine.length <= 30) {
+        setManualName(nameLine);
+        filled++;
+      }
+    }
+
+    // Helper: find number after keyword
+    const extractValue = (keywords: string[]): number | null => {
+      for (const kw of keywords) {
+        const re = new RegExp(kw + '[^\\d]*(\\d+\\.?\\d*)', 'i');
+        const m = text.match(re);
+        if (m) return parseFloat(m[1]);
+      }
+      return null;
+    };
+
+    // Energy (handle kJ → kcal)
+    const energyKJ = extractValue(['能量', 'energy']);
+    const energyKcal = extractValue(['热量', 'calories', 'kcal', '千卡']);
+    if (energyKcal != null) {
+      setManualCalories(String(Math.round(energyKcal)));
+      filled++;
+    } else if (energyKJ != null) {
+      // Check if unit is kJ (look for kJ/KJ/kj near the number)
+      const kcalPattern = /(?:能量|energy)[^\d]*\d+\.?\d*\s*(?:kcal|千卡)/i;
+      const isKcal = kcalPattern.test(text);
+      if (isKcal) {
+        setManualCalories(String(Math.round(energyKJ)));
+      } else {
+        setManualCalories(String(Math.round(energyKJ / 4.184)));
+      }
+      filled++;
+    }
+
+    const protein = extractValue(['蛋白质', 'protein']);
+    if (protein != null) { setManualProtein(String(protein)); filled++; }
+
+    const fat = extractValue(['脂肪', 'fat']);
+    if (fat != null) { setManualFat(String(fat)); filled++; }
+
+    const carbs = extractValue(['碳水化合物', '碳水', 'carbohydrate', 'carbs']);
+    if (carbs != null) { setManualCarbs(String(carbs)); filled++; }
+
+    if (filled === 0) {
+      setParseMsg('未能识别营养信息，请手动输入');
+    }
+    setShowPasteArea(false);
+    setPasteText('');
+  };
+
   const mealLabels = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
 
   return (
@@ -170,6 +234,46 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
         {manualMode ? (
           <div className="space-y-3 mb-4">
             <p className="text-xs text-gray-400">添加新食材到食物库（每100g营养数据），保存后可在"搜索食物"中使用</p>
+
+            {/* Paste nutrition text */}
+            {!showPasteArea ? (
+              <button
+                onClick={() => setShowPasteArea(true)}
+                className="text-xs text-blue-500 underline underline-offset-2"
+              >
+                粘贴营养信息自动识别
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <textarea
+                  placeholder="粘贴包含营养成分的文字..."
+                  value={pasteText}
+                  onChange={e => setPasteText(e.target.value)}
+                  rows={5}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => parseNutritionText(pasteText)}
+                    disabled={!pasteText.trim()}
+                    className="flex-1 py-1.5 rounded-lg bg-blue-500 text-white text-sm disabled:opacity-50"
+                  >
+                    识别
+                  </button>
+                  <button
+                    onClick={() => { setShowPasteArea(false); setPasteText(''); }}
+                    className="py-1.5 px-3 rounded-lg bg-gray-100 text-gray-500 text-sm"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {parseMsg && (
+              <div className="text-xs text-orange-500">{parseMsg}</div>
+            )}
+
             <input
               placeholder="食物名称"
               value={manualName}
