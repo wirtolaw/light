@@ -24,11 +24,17 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
   const [manualCarbs, setManualCarbs] = useState('');
   const [manualFat, setManualFat] = useState('');
   const [saving, setSaving] = useState(false);
-  const [customFoods, setCustomFoods] = useState<FoodItem[]>([]);
+  const [customFoods, setCustomFoods] = useState<(FoodItem & { id?: string })[]>([]);
   const [saveSuccess, setSaveSuccess] = useState('');
   const [showPasteArea, setShowPasteArea] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [parseMsg, setParseMsg] = useState('');
+  const [editingCustomFood, setEditingCustomFood] = useState<(FoodItem & { id?: string }) | null>(null);
+  const [editFoodName, setEditFoodName] = useState('');
+  const [editFoodCal, setEditFoodCal] = useState('');
+  const [editFoodProtein, setEditFoodProtein] = useState('');
+  const [editFoodCarbs, setEditFoodCarbs] = useState('');
+  const [editFoodFat, setEditFoodFat] = useState('');
 
   useEffect(() => {
     const userId = getUserId();
@@ -41,6 +47,7 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
       .then(({ data }) => {
         if (data) {
           setCustomFoods(data.map(d => ({
+            id: d.id,
             name: d.name,
             calories_per_100g: d.calories_per_100g,
             protein_per_100g: d.protein_per_100g,
@@ -186,6 +193,53 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
     }
     setShowPasteArea(false);
     setPasteText('');
+  };
+
+  const isCustomFood = (food: FoodItem): (FoodItem & { id?: string }) | null => {
+    return customFoods.find(cf => cf.name === food.name && cf.id) || null;
+  };
+
+  const openFoodEdit = (food: FoodItem & { id?: string }) => {
+    setEditingCustomFood(food);
+    setEditFoodName(food.name);
+    setEditFoodCal(String(food.calories_per_100g));
+    setEditFoodProtein(String(food.protein_per_100g));
+    setEditFoodCarbs(String(food.carbs_per_100g));
+    setEditFoodFat(String(food.fat_per_100g));
+  };
+
+  const handleFoodEditSave = async () => {
+    if (!editingCustomFood?.id) return;
+    setSaving(true);
+    await supabase.from('light_food_database').update({
+      name: editFoodName,
+      calories_per_100g: parseFloat(editFoodCal) || 0,
+      protein_per_100g: parseFloat(editFoodProtein) || 0,
+      carbs_per_100g: parseFloat(editFoodCarbs) || 0,
+      fat_per_100g: parseFloat(editFoodFat) || 0,
+    }).eq('id', editingCustomFood.id);
+
+    setCustomFoods(prev => prev.map(cf =>
+      cf.id === editingCustomFood.id ? {
+        ...cf,
+        name: editFoodName,
+        calories_per_100g: parseFloat(editFoodCal) || 0,
+        protein_per_100g: parseFloat(editFoodProtein) || 0,
+        carbs_per_100g: parseFloat(editFoodCarbs) || 0,
+        fat_per_100g: parseFloat(editFoodFat) || 0,
+      } : cf
+    ));
+    setEditingCustomFood(null);
+    setSaving(false);
+  };
+
+  const handleFoodEditDelete = async () => {
+    if (!editingCustomFood?.id) return;
+    setSaving(true);
+    await supabase.from('light_food_database').delete().eq('id', editingCustomFood.id);
+    setCustomFoods(prev => prev.filter(cf => cf.id !== editingCustomFood.id));
+    setEditingCustomFood(null);
+    setSaving(false);
   };
 
   const mealLabels = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
@@ -334,16 +388,28 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
             {/* Food list */}
             {!selectedFood && (
               <div className="max-h-40 overflow-y-auto mb-4 space-y-1">
-                {filteredFoods.map((food, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSelectedFood(food)}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm flex justify-between"
-                  >
-                    <span>{food.name}</span>
-                    <span className="text-gray-400">{food.calories_per_100g} kcal/100g</span>
-                  </button>
-                ))}
+                {filteredFoods.map((food, i) => {
+                  const custom = isCustomFood(food);
+                  return (
+                    <div key={i} className="flex items-center rounded-lg hover:bg-gray-50">
+                      <button
+                        onClick={() => setSelectedFood(food)}
+                        className="flex-1 text-left px-3 py-2 text-sm flex justify-between"
+                      >
+                        <span>{food.name}</span>
+                        <span className="text-gray-400">{food.calories_per_100g} kcal/100g</span>
+                      </button>
+                      {custom && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openFoodEdit(custom); }}
+                          className="px-2 py-2 text-gray-300 hover:text-gray-500 text-xs"
+                        >
+                          ✏️
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -401,6 +467,72 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
         )}
 
       </div>
+
+      {/* Custom food edit modal */}
+      {editingCustomFood && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]" onClick={() => setEditingCustomFood(null)}>
+          <div className="bg-white rounded-2xl p-5 w-[90%] max-w-[380px]" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">编辑食物</h3>
+              <button onClick={() => setEditingCustomFood(null)} className="text-gray-400 text-xl">&times;</button>
+            </div>
+            <div className="space-y-3 mb-4">
+              <input
+                placeholder="食物名称"
+                value={editFoodName}
+                onChange={e => setEditFoodName(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500"
+              />
+              <input
+                type="number"
+                placeholder="热量 (kcal/100g)"
+                value={editFoodCal}
+                onChange={e => setEditFoodCal(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="number"
+                  placeholder="蛋白质"
+                  value={editFoodProtein}
+                  onChange={e => setEditFoodProtein(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-green-500"
+                />
+                <input
+                  type="number"
+                  placeholder="碳水"
+                  value={editFoodCarbs}
+                  onChange={e => setEditFoodCarbs(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-green-500"
+                />
+                <input
+                  type="number"
+                  placeholder="脂肪"
+                  value={editFoodFat}
+                  onChange={e => setEditFoodFat(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-green-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleFoodEditSave}
+                disabled={saving || !editFoodName}
+                className="flex-1 py-3 rounded-lg bg-green-500 text-white font-medium disabled:opacity-50"
+              >
+                {saving ? '保存中...' : '保存'}
+              </button>
+              <button
+                onClick={() => { if (confirm('确定删除这个食物？')) handleFoodEditDelete(); }}
+                disabled={saving}
+                className="flex-1 py-3 rounded-lg bg-red-500 text-white font-medium disabled:opacity-50"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
