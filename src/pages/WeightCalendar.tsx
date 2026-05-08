@@ -8,6 +8,8 @@ interface WeightRecord {
   morning_weight: number | null;
   evening_weight: number | null;
   is_fasting_day: boolean;
+  has_bowel: boolean;
+  bowel_note: string | null;
 }
 
 export default function WeightCalendar() {
@@ -17,6 +19,8 @@ export default function WeightCalendar() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [modalDate, setModalDate] = useState<string | undefined>();
+  const [bowelLabels, setBowelLabels] = useState<string[]>([]);
+  const [bowelInput, setBowelInput] = useState('');
 
   const userId = getUserId();
 
@@ -35,6 +39,17 @@ export default function WeightCalendar() {
       data.forEach(r => { map[r.date] = r; });
       setRecords(map);
     }
+
+    // Load bowel labels
+    const { data: profile } = await supabase
+      .from('light_user_profile')
+      .select('bowel_labels')
+      .eq('user_id', userId)
+      .limit(1)
+      .single();
+    if (profile?.bowel_labels) {
+      setBowelLabels(profile.bowel_labels);
+    }
   };
 
   useEffect(() => { loadData(); }, []);
@@ -42,17 +57,14 @@ export default function WeightCalendar() {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
-  const startDow = getDay(monthStart); // 0=Sun
+  const startDow = getDay(monthStart);
 
   const getColorClass = (dateStr: string): string => {
     const rec = records[dateStr];
     if (!rec || !rec.morning_weight) return '';
-
-    // Find previous day's record
     const prevDate = format(subDays(new Date(dateStr), 1), 'yyyy-MM-dd');
     const prevRec = records[prevDate];
     if (!prevRec || !prevRec.morning_weight) return 'bg-gray-100';
-
     const diff = rec.morning_weight - prevRec.morning_weight;
     if (diff < 0) return 'bg-green-100 text-green-700';
     if (diff > 0) return 'bg-red-100 text-red-700';
@@ -64,43 +76,99 @@ export default function WeightCalendar() {
     const rec = records[selectedDate];
     if (!rec) return null;
 
-    // Daily change
     const prevDate = format(subDays(new Date(selectedDate), 1), 'yyyy-MM-dd');
     const prevRec = records[prevDate];
     const dailyChange = rec.morning_weight && prevRec?.morning_weight
-      ? rec.morning_weight - prevRec.morning_weight
-      : null;
+      ? rec.morning_weight - prevRec.morning_weight : null;
 
-    // Weekly change (7 days ago)
     const weekDate = format(subDays(new Date(selectedDate), 7), 'yyyy-MM-dd');
     const weekRec = records[weekDate];
     const weeklyChange = rec.morning_weight && weekRec?.morning_weight
-      ? rec.morning_weight - weekRec.morning_weight
-      : null;
+      ? rec.morning_weight - weekRec.morning_weight : null;
 
-    // Monthly change (30 days ago)
     const monthDate = format(subDays(new Date(selectedDate), 30), 'yyyy-MM-dd');
     const monthRec = records[monthDate];
     const monthlyChange = rec.morning_weight && monthRec?.morning_weight
-      ? rec.morning_weight - monthRec.morning_weight
-      : null;
+      ? rec.morning_weight - monthRec.morning_weight : null;
 
-    // Total change (from first record)
     const firstRec = allRecords.find(r => r.morning_weight);
     const totalChange = rec.morning_weight && firstRec?.morning_weight
-      ? rec.morning_weight - firstRec.morning_weight
-      : null;
+      ? rec.morning_weight - firstRec.morning_weight : null;
 
     return { rec, dailyChange, weeklyChange, monthlyChange, totalChange };
   };
 
   const details = getSelectedDetails();
+  const selectedRec = selectedDate ? records[selectedDate] : null;
 
   const formatChange = (val: number | null) => {
     if (val === null) return '-';
     const sign = val > 0 ? '+' : '';
     const color = val < 0 ? 'text-green-600' : val > 0 ? 'text-red-500' : 'text-gray-500';
     return <span className={color}>{sign}{val.toFixed(1)} kg</span>;
+  };
+
+  const toggleBowel = async (checked: boolean) => {
+    if (!userId || !selectedDate) return;
+
+    const { data: existing } = await supabase
+      .from('light_weight_records')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('date', selectedDate)
+      .limit(1)
+      .single();
+
+    if (existing) {
+      await supabase.from('light_weight_records')
+        .update({ has_bowel: checked, bowel_note: checked ? (selectedRec?.bowel_note || null) : null })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('light_weight_records').insert({
+        user_id: userId,
+        date: selectedDate,
+        has_bowel: checked,
+      });
+    }
+    loadData();
+  };
+
+  const saveBowelNote = async (note: string) => {
+    if (!userId || !selectedDate) return;
+
+    const { data: existing } = await supabase
+      .from('light_weight_records')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('date', selectedDate)
+      .limit(1)
+      .single();
+
+    if (existing) {
+      await supabase.from('light_weight_records')
+        .update({ bowel_note: note || null })
+        .eq('id', existing.id);
+    }
+
+    // Update bowel labels history
+    const updated = [note, ...bowelLabels.filter(l => l !== note)].slice(0, 6);
+    setBowelLabels(updated);
+    await supabase.from('light_user_profile')
+      .update({ bowel_labels: updated })
+      .eq('user_id', userId);
+
+    loadData();
+  };
+
+  const handleBowelLabelClick = (label: string) => {
+    saveBowelNote(label);
+    setBowelInput('');
+  };
+
+  const handleBowelInputSubmit = () => {
+    if (!bowelInput.trim()) return;
+    saveBowelNote(bowelInput.trim());
+    setBowelInput('');
   };
 
   return (
@@ -127,6 +195,10 @@ export default function WeightCalendar() {
           const rec = records[dateStr];
           const colorClass = getColorClass(dateStr);
           const isSelected = selectedDate === dateStr;
+          const icons = [
+            rec?.is_fasting_day ? '💧' : '',
+            rec?.has_bowel ? '💩' : '',
+          ].filter(Boolean).join('');
 
           return (
             <button
@@ -138,8 +210,8 @@ export default function WeightCalendar() {
               {rec?.morning_weight && (
                 <span className="text-[10px] opacity-70">{rec.morning_weight.toFixed(1)}</span>
               )}
-              {rec?.is_fasting_day && (
-                <span className="absolute top-0.5 right-0.5 text-[8px]">💧</span>
+              {icons && (
+                <span className="absolute top-0 right-0.5 text-[7px] leading-none">{icons}</span>
               )}
             </button>
           );
@@ -194,6 +266,60 @@ export default function WeightCalendar() {
               暂无记录，点击右上角记录体重
             </div>
           )}
+
+          {/* Bowel tracking */}
+          <div className="border-t mt-3 pt-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={selectedRec?.has_bowel || false}
+                onChange={e => toggleBowel(e.target.checked)}
+                className="w-4 h-4 accent-amber-600"
+              />
+              <span className="text-gray-600">排便 💩</span>
+              {selectedRec?.bowel_note && (
+                <span className="text-xs text-gray-400 ml-1">— {selectedRec.bowel_note}</span>
+              )}
+            </label>
+
+            {selectedRec?.has_bowel && (
+              <div className="mt-2 space-y-2">
+                {bowelLabels.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {bowelLabels.map((label, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleBowelLabelClick(label)}
+                        className={`px-2.5 py-1 rounded-full text-xs ${
+                          selectedRec.bowel_note === label
+                            ? 'bg-amber-100 text-amber-700 font-medium'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    placeholder="描述（可选）"
+                    value={bowelInput}
+                    onChange={e => setBowelInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleBowelInputSubmit(); }}
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-amber-500"
+                  />
+                  <button
+                    onClick={handleBowelInputSubmit}
+                    disabled={!bowelInput.trim()}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs disabled:opacity-50"
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
