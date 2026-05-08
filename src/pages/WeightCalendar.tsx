@@ -195,11 +195,6 @@ export default function WeightCalendar() {
           const rec = records[dateStr];
           const colorClass = getColorClass(dateStr);
           const isSelected = selectedDate === dateStr;
-          const icons = [
-            rec?.is_fasting_day ? '💧' : '',
-            rec?.has_bowel ? '💩' : '',
-          ].filter(Boolean).join('');
-
           return (
             <button
               key={dateStr}
@@ -210,8 +205,11 @@ export default function WeightCalendar() {
               {rec?.morning_weight && (
                 <span className="text-[10px] opacity-70">{rec.morning_weight.toFixed(1)}</span>
               )}
-              {icons && (
-                <span className="absolute top-0 right-0.5 text-[7px] leading-none">{icons}</span>
+              {rec?.is_fasting_day && (
+                <span className="absolute top-0 right-0.5 text-[6px] leading-none">💧</span>
+              )}
+              {rec?.has_bowel && (
+                <span className="absolute bottom-0.5 left-0.5 text-[6px] leading-none">💩</span>
               )}
             </button>
           );

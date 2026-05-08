@@ -360,12 +360,15 @@ export default function Calories() {
             <button
               key={dateStr}
               onClick={() => setSelectedDate(dateStr)}
-              className={`aspect-square flex flex-col items-center justify-center rounded-lg text-xs ${
+              className={`aspect-square flex flex-col items-center justify-center rounded-lg text-xs relative overflow-hidden ${
                 isSelected ? 'ring-2 ring-green-500 bg-green-50' : cal ? 'bg-gray-50' : ''
               }`}
             >
-              <span className="font-medium">{day.getDate()}{isFasting ? ' 💧' : ''}</span>
-              {cal && <span className="text-[9px] text-gray-500">{cal}</span>}
+              {isFasting && (
+                <span className="absolute inset-0 flex items-center justify-center text-2xl opacity-15 pointer-events-none">💧</span>
+              )}
+              <span className="font-medium relative">{day.getDate()}</span>
+              {cal && <span className="text-[9px] text-gray-500 relative">{cal}</span>}
             </button>
           );
         })}
