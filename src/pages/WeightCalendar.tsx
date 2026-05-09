@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase, getUserId } from '../lib/supabase';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, subDays } from 'date-fns';
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import WeightEntryModal from '../components/WeightEntryModal';
 
 interface WeightRecord {
@@ -61,6 +62,7 @@ export default function WeightCalendar() {
 
   const getColorClass = (dateStr: string): string => {
     const rec = records[dateStr];
+    if (rec?.is_fasting_day) return 'bg-blue-50 text-blue-700';
     if (!rec || !rec.morning_weight) return '';
     const prevDate = format(subDays(new Date(dateStr), 1), 'yyyy-MM-dd');
     const prevRec = records[prevDate];
@@ -205,9 +207,6 @@ export default function WeightCalendar() {
               {rec?.morning_weight && (
                 <span className="text-[10px] opacity-70">{rec.morning_weight.toFixed(1)}</span>
               )}
-              {rec?.is_fasting_day && (
-                <span className="absolute top-0 right-0.5 text-[6px] leading-none">💧</span>
-              )}
               {rec?.has_bowel && (
                 <span className="absolute bottom-0.5 left-0.5 text-[6px] leading-none">💩</span>
               )}
@@ -220,7 +219,10 @@ export default function WeightCalendar() {
       {selectedDate && (
         <div className="bg-gray-50 rounded-xl p-4 mb-4">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-medium">{selectedDate}</h3>
+            <h3 className="text-sm font-medium">
+              {selectedDate}
+              {selectedRec?.is_fasting_day && <span className="ml-2 text-xs text-blue-500 font-normal">液断</span>}
+            </h3>
             <button
               onClick={() => { setModalDate(selectedDate); setShowModal(true); }}
               className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg"
@@ -345,6 +347,28 @@ export default function WeightCalendar() {
           </div>
         </div>
       )}
+
+      {/* 7-day chart */}
+      {(() => {
+        const sevenDaysAgo = format(subDays(new Date(), 7), 'yyyy-MM-dd');
+        const chartData = allRecords
+          .filter(w => w.morning_weight && w.date >= sevenDaysAgo)
+          .map(w => ({ date: w.date.slice(5), weight: w.morning_weight }));
+        if (chartData.length < 2) return null;
+        return (
+          <div className="mt-4 bg-gray-50 rounded-xl p-4">
+            <h3 className="text-sm font-medium text-gray-600 mb-3">最近7天体重</h3>
+            <ResponsiveContainer width="100%" height={150}>
+              <LineChart data={chartData}>
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                <YAxis domain={['dataMin - 0.5', 'dataMax + 0.5']} tick={{ fontSize: 11 }} width={40} />
+                <Tooltip />
+                <Line type="monotone" dataKey="weight" stroke="#4ade80" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      })()}
 
       {showModal && (
         <WeightEntryModal

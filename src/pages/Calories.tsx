@@ -360,15 +360,14 @@ export default function Calories() {
             <button
               key={dateStr}
               onClick={() => setSelectedDate(dateStr)}
-              className={`aspect-square flex flex-col items-center justify-center rounded-lg text-xs relative overflow-hidden ${
-                isSelected ? 'ring-2 ring-green-500 bg-green-50' : cal ? 'bg-gray-50' : ''
+              className={`aspect-square flex flex-col items-center justify-center rounded-lg text-xs ${
+                isSelected ? 'ring-2 ring-green-500 bg-green-50'
+                : isFasting ? 'bg-blue-50'
+                : cal ? 'bg-gray-50' : ''
               }`}
             >
-              {isFasting && (
-                <span className="absolute inset-0 flex items-center justify-center text-2xl opacity-15 pointer-events-none">💧</span>
-              )}
-              <span className="font-medium relative">{day.getDate()}</span>
-              {cal && <span className="text-[9px] text-gray-500 relative">{cal}</span>}
+              <span className="font-medium">{day.getDate()}</span>
+              {cal && <span className="text-[9px] text-gray-500">{cal}</span>}
             </button>
           );
         })}
@@ -377,7 +376,10 @@ export default function Calories() {
       {/* Daily summary */}
       <div className="bg-gray-50 rounded-xl p-4 mb-4">
         <div className="flex justify-between items-center mb-3">
-          <h3 className="text-sm font-medium">{selectedDate}{fastingDays[selectedDate] ? ' 💧' : ''}</h3>
+          <h3 className="text-sm font-medium">
+            {selectedDate}
+            {fastingDays[selectedDate] && <span className="ml-2 text-xs text-blue-500 font-normal">液断</span>}
+          </h3>
           <button
             onClick={() => setShowFoodModal(true)}
             className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg"

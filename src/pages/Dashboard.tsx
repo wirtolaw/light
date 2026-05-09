@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, getUserId } from '../lib/supabase';
-import { format, subDays, differenceInDays } from 'date-fns';
+import { format, differenceInDays } from 'date-fns';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import WeightEntryModal from '../components/WeightEntryModal';
 
@@ -50,13 +50,11 @@ export default function Dashboard() {
 
     if (profileData) setProfile(profileData);
 
-    // Last 7 days weights
-    const sevenDaysAgo = format(subDays(new Date(), 7), 'yyyy-MM-dd');
+    // All weight records for trend chart
     const { data: weightData } = await supabase
       .from('light_weight_records')
       .select('date, morning_weight, evening_weight, activity_factor, calorie_target_factor, is_fasting_day')
       .eq('user_id', userId)
-      .gte('date', sevenDaysAgo)
       .order('date', { ascending: true });
 
     if (weightData) {
@@ -231,16 +229,20 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Weight chart */}
+      {/* Weight trend chart */}
       {chartData.length > 1 && (
         <div className="mb-6 bg-gray-50 rounded-xl p-4">
-          <h3 className="text-sm font-medium text-gray-600 mb-3">最近7天体重</h3>
+          <h3 className="text-sm font-medium text-gray-600 mb-3">体重趋势</h3>
           <ResponsiveContainer width="100%" height={150}>
             <LineChart data={chartData}>
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10 }}
+                interval={Math.max(0, Math.floor(chartData.length / 6) - 1)}
+              />
               <YAxis domain={['dataMin - 0.5', 'dataMax + 0.5']} tick={{ fontSize: 11 }} width={40} />
               <Tooltip />
-              <Line type="monotone" dataKey="weight" stroke="#4ade80" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="weight" stroke="#4ade80" strokeWidth={2} dot={chartData.length <= 14 ? { r: 3 } : false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
