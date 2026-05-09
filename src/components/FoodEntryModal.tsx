@@ -29,6 +29,8 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
   const [showPasteArea, setShowPasteArea] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [parseMsg, setParseMsg] = useState('');
+  const [parsedItems, setParsedItems] = useState<{name: string; cal: number; protein: number; carbs: number; fat: number; expanded?: boolean}[]>([]);
+  const [editingParsedIdx, setEditingParsedIdx] = useState<number | null>(null);
   const [editingCustomFood, setEditingCustomFood] = useState<(FoodItem & { id?: string }) | null>(null);
   const [editFoodName, setEditFoodName] = useState('');
   const [editFoodCal, setEditFoodCal] = useState('');
@@ -134,65 +136,173 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
     setSaving(false);
   };
 
-  const parseNutritionText = (text: string) => {
-    setParseMsg('');
-    let filled = 0;
+  const parseSingleBlock = (block: string): {name: string; cal: number; protein: number; carbs: number; fat: number} | null => {
+    const lines = block.trim().split('\n').filter(l => l.trim());
+    if (lines.length === 0) return null;
 
-    // Extract name: first line, strip trailing punctuation/separators
-    const lines = text.trim().split('\n').filter(l => l.trim());
-    if (lines.length > 0) {
-      const nameLine = lines[0]
-        .replace(/[—–\-:：]+.*$/, '')  // strip everything after — or : on first line
-        .replace(/每\s*\d+\s*g.*$/i, '')
-        .trim();
-      if (nameLine && nameLine.length <= 30) {
-        setManualName(nameLine);
-        filled++;
-      }
+    // Detect serving size for conversion (e.g., "每勺31g", "每份25g", "per serving 30g")
+    let servingG = 100;
+    const servingMatch = block.match(/每[勺份]?\s*(\d+\.?\d*)\s*g/i) || block.match(/per\s+(?:serving|scoop)\s+(\d+\.?\d*)\s*g/i);
+    if (servingMatch) {
+      servingG = parseFloat(servingMatch[1]);
     }
+    const isper100 = /每\s*100\s*g/i.test(block) || /per\s*100\s*g/i.test(block);
+    if (isper100) servingG = 100;
 
-    // Helper: find number after keyword
-    const extractValue = (keywords: string[]): number | null => {
+    const scale = 100 / servingG;
+
+    // Extract name from first line
+    let name = '';
+    const nameLine = lines[0]
+      .replace(/[—–\-:：]+\s*$/, '')
+      .replace(/（[^）]*）/g, '')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/每[勺份]?\s*\d+\.?\d*\s*g/gi, '')
+      .replace(/per\s+(?:serving|scoop)\s+\d+\.?\d*\s*g/gi, '')
+      .replace(/每\s*100\s*g/gi, '')
+      .trim();
+    if (nameLine && nameLine.length <= 50) name = nameLine;
+
+    // Extract values
+    const extractVal = (keywords: string[]): number | null => {
       for (const kw of keywords) {
         const re = new RegExp(kw + '[^\\d]*(\\d+\\.?\\d*)', 'i');
-        const m = text.match(re);
+        const m = block.match(re);
         if (m) return parseFloat(m[1]);
       }
       return null;
     };
 
-    // Energy (handle kJ → kcal)
-    const energyKJ = extractValue(['能量', 'energy']);
-    const energyKcal = extractValue(['热量', 'calories', 'kcal', '千卡']);
+    let cal = 0;
+    const energyKJ = extractVal(['能量', 'energy']);
+    const energyKcal = extractVal(['热量', 'calories', 'kcal', '千卡']);
     if (energyKcal != null) {
-      setManualCalories(String(Math.round(energyKcal)));
-      filled++;
+      cal = energyKcal;
     } else if (energyKJ != null) {
-      // Check if unit is kJ (look for kJ/KJ/kj near the number)
-      const kcalPattern = /(?:能量|energy)[^\d]*\d+\.?\d*\s*(?:kcal|千卡)/i;
-      const isKcal = kcalPattern.test(text);
-      if (isKcal) {
-        setManualCalories(String(Math.round(energyKJ)));
-      } else {
-        setManualCalories(String(Math.round(energyKJ / 4.184)));
+      const isKcalUnit = /(?:能量|energy)[^\d]*\d+\.?\d*\s*(?:kcal|千卡)/i.test(block);
+      cal = isKcalUnit ? energyKJ : energyKJ / 4.184;
+    }
+
+    const protein = extractVal(['蛋白质', 'protein']) || 0;
+    const fat = extractVal(['脂肪', 'fat']) || 0;
+    const carbs = extractVal(['碳水化合物', '碳水', 'carbohydrate', 'carbs']) || 0;
+
+    if (!name && cal === 0 && protein === 0 && fat === 0 && carbs === 0) return null;
+
+    return {
+      name,
+      cal: Math.round(cal * scale),
+      protein: Math.round(protein * scale * 10) / 10,
+      carbs: Math.round(carbs * scale * 10) / 10,
+      fat: Math.round(fat * scale * 10) / 10,
+    };
+  };
+
+  const parseNutritionText = (text: string) => {
+    setParseMsg('');
+
+    // Split into blocks: by double newline, or by lines that look like food headers
+    // A food header: contains Chinese/English text + optional serving info + colon
+    const blocks: string[] = [];
+    const rawBlocks = text.split(/\n\s*\n/);
+
+    for (const rb of rawBlocks) {
+      // Further split if multiple food items are in one block
+      const subLines = rb.split('\n');
+      let current = '';
+      for (const line of subLines) {
+        // Check if line looks like a new food header (has a name-like pattern followed by nutrition data below)
+        const isHeader = /^[^\d\n]{2,}.*[:：]/.test(line.trim()) && !/蛋白质|脂肪|碳水|热量|能量/i.test(line);
+        if (isHeader && current.trim() && /\d/.test(current)) {
+          blocks.push(current);
+          current = line + '\n';
+        } else {
+          current += line + '\n';
+        }
       }
-      filled++;
+      if (current.trim()) blocks.push(current);
     }
 
-    const protein = extractValue(['蛋白质', 'protein']);
-    if (protein != null) { setManualProtein(String(protein)); filled++; }
+    const items: typeof parsedItems = [];
+    for (const block of blocks) {
+      const parsed = parseSingleBlock(block);
+      if (parsed) items.push(parsed);
+    }
 
-    const fat = extractValue(['脂肪', 'fat']);
-    if (fat != null) { setManualFat(String(fat)); filled++; }
-
-    const carbs = extractValue(['碳水化合物', '碳水', 'carbohydrate', 'carbs']);
-    if (carbs != null) { setManualCarbs(String(carbs)); filled++; }
-
-    if (filled === 0) {
+    if (items.length === 0) {
       setParseMsg('未能识别营养信息，请手动输入');
+      return;
     }
+
+    // Single item: fill the manual form directly (backward compatible)
+    if (items.length === 1) {
+      setManualName(items[0].name);
+      setManualCalories(String(items[0].cal));
+      setManualProtein(String(items[0].protein));
+      setManualCarbs(String(items[0].carbs));
+      setManualFat(String(items[0].fat));
+      setShowPasteArea(false);
+      setPasteText('');
+      return;
+    }
+
+    // Multiple items: show batch list
+    setParsedItems(items);
     setShowPasteArea(false);
     setPasteText('');
+  };
+
+  const handleBatchSave = async () => {
+    const userId = getUserId();
+    if (!userId || parsedItems.length === 0) return;
+    setSaving(true);
+
+    for (const item of parsedItems) {
+      await supabase.from('light_food_database').insert({
+        user_id: userId,
+        name: item.name,
+        calories_per_100g: item.cal,
+        protein_per_100g: item.protein,
+        carbs_per_100g: item.carbs,
+        fat_per_100g: item.fat,
+        is_custom: true,
+      });
+    }
+
+    // Refresh custom foods list
+    const { data } = await supabase
+      .from('light_food_database')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_custom', true);
+    if (data) {
+      setCustomFoods(data.map(d => ({
+        id: d.id,
+        name: d.name,
+        calories_per_100g: d.calories_per_100g,
+        protein_per_100g: d.protein_per_100g,
+        carbs_per_100g: d.carbs_per_100g,
+        fat_per_100g: d.fat_per_100g,
+      })));
+    }
+
+    setSaveSuccess(`已保存 ${parsedItems.length} 种食物到食物库`);
+    setParsedItems([]);
+    setTimeout(() => setSaveSuccess(''), 3000);
+    setSaving(false);
+  };
+
+  const removeParsedItem = (idx: number) => {
+    setParsedItems(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const updateParsedItem = (idx: number, field: string, value: string) => {
+    setParsedItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      if (field === 'name') return { ...item, name: value };
+      const num = parseFloat(value) || 0;
+      return { ...item, [field]: num };
+    }));
   };
 
   const isCustomFood = (food: FoodItem): (FoodItem & { id?: string }) | null => {
@@ -326,6 +436,55 @@ export default function FoodEntryModal({ date, meal: initialMeal, onClose, onSav
 
             {parseMsg && (
               <div className="text-xs text-orange-500">{parseMsg}</div>
+            )}
+
+            {/* Batch parsed items list */}
+            {parsedItems.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500">识别到 {parsedItems.length} 种食物：</p>
+                {parsedItems.map((item, idx) => (
+                  <div key={idx} className="bg-gray-50 rounded-lg p-2">
+                    <div className="flex items-center justify-between">
+                      <button
+                        onClick={() => setEditingParsedIdx(editingParsedIdx === idx ? null : idx)}
+                        className="flex-1 text-left"
+                      >
+                        <div className="text-sm font-medium">{item.name || '(未命名)'}</div>
+                        <div className="text-xs text-gray-400">
+                          {item.cal} kcal · 蛋白 {item.protein}g · 碳水 {item.carbs}g · 脂肪 {item.fat}g
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => removeParsedItem(idx)}
+                        className="text-gray-300 text-sm px-1 ml-1"
+                      >❌</button>
+                    </div>
+                    {editingParsedIdx === idx && (
+                      <div className="mt-2 space-y-1.5">
+                        <input value={item.name} onChange={e => updateParsedItem(idx, 'name', e.target.value)}
+                          placeholder="名称" className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
+                        <div className="grid grid-cols-4 gap-1">
+                          <input type="number" value={item.cal} onChange={e => updateParsedItem(idx, 'cal', e.target.value)}
+                            placeholder="热量" className="border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                          <input type="number" value={item.protein} onChange={e => updateParsedItem(idx, 'protein', e.target.value)}
+                            placeholder="蛋白" className="border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                          <input type="number" value={item.carbs} onChange={e => updateParsedItem(idx, 'carbs', e.target.value)}
+                            placeholder="碳水" className="border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                          <input type="number" value={item.fat} onChange={e => updateParsedItem(idx, 'fat', e.target.value)}
+                            placeholder="脂肪" className="border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={handleBatchSave}
+                  disabled={saving}
+                  className="w-full py-2.5 rounded-lg bg-blue-500 text-white font-medium text-sm disabled:opacity-50"
+                >
+                  {saving ? '保存中...' : `保存 ${parsedItems.length} 项到食物库`}
+                </button>
+              </div>
             )}
 
             <input
