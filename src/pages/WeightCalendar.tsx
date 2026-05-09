@@ -62,7 +62,6 @@ export default function WeightCalendar() {
 
   const getColorClass = (dateStr: string): string => {
     const rec = records[dateStr];
-    if (rec?.is_fasting_day) return 'bg-blue-50 text-blue-700';
     if (!rec || !rec.morning_weight) return '';
     const prevDate = format(subDays(new Date(dateStr), 1), 'yyyy-MM-dd');
     const prevRec = records[prevDate];
@@ -206,6 +205,9 @@ export default function WeightCalendar() {
               <span className="font-medium">{day.getDate()}</span>
               {rec?.morning_weight && (
                 <span className="text-[10px] opacity-70">{rec.morning_weight.toFixed(1)}</span>
+              )}
+              {rec?.is_fasting_day && (
+                <span className="absolute top-0 right-0.5 text-[6px] leading-none">💧</span>
               )}
               {rec?.has_bowel && (
                 <span className="absolute bottom-0.5 left-0.5 text-[6px] leading-none">💩</span>
