@@ -17,12 +17,11 @@ export default function WeightEntryModal({ date, onClose, onSaved }: Props) {
 
   const handleSave = async () => {
     const userId = getUserId();
-    if (!userId || !weight) return;
+    if (!userId || (!weight && !isFasting)) return;
 
     setSaving(true);
-    const weightVal = parseFloat(weight);
+    const weightVal = weight ? parseFloat(weight) : null;
 
-    // Try to get existing record for this date
     const { data: existing } = await supabase
       .from('light_weight_records')
       .select('*')
@@ -31,26 +30,28 @@ export default function WeightEntryModal({ date, onClose, onSaved }: Props) {
       .single();
 
     if (existing) {
-      // Update existing record
       const updateData: Record<string, unknown> = {
         is_fasting_day: isFasting,
       };
-      if (type === 'morning') updateData.morning_weight = weightVal;
-      else updateData.evening_weight = weightVal;
+      if (weightVal !== null) {
+        if (type === 'morning') updateData.morning_weight = weightVal;
+        else updateData.evening_weight = weightVal;
+      }
 
       await supabase
         .from('light_weight_records')
         .update(updateData)
         .eq('id', existing.id);
     } else {
-      // Insert new record
       const insertData: Record<string, unknown> = {
         user_id: userId,
         date: today,
         is_fasting_day: isFasting,
       };
-      if (type === 'morning') insertData.morning_weight = weightVal;
-      else insertData.evening_weight = weightVal;
+      if (weightVal !== null) {
+        if (type === 'morning') insertData.morning_weight = weightVal;
+        else insertData.evening_weight = weightVal;
+      }
 
       await supabase.from('light_weight_records').insert(insertData);
     }
@@ -113,7 +114,7 @@ export default function WeightEntryModal({ date, onClose, onSaved }: Props) {
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || !weight}
+            disabled={saving || (!weight && !isFasting)}
             className="flex-1 py-2 rounded-lg bg-green-500 text-white text-sm disabled:opacity-50"
           >
             {saving ? '保存中...' : '保存'}
