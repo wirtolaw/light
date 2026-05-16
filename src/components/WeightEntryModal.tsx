@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase, getUserId } from '../lib/supabase';
 import { format } from 'date-fns';
 
@@ -14,6 +14,25 @@ export default function WeightEntryModal({ date, onClose, onSaved }: Props) {
   const [weight, setWeight] = useState('');
   const [isFasting, setIsFasting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const userId = getUserId();
+    if (!userId) return;
+    supabase
+      .from('light_weight_records')
+      .select('morning_weight, evening_weight, is_fasting_day')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setIsFasting(!!data.is_fasting_day);
+          if (data.morning_weight) setWeight(String(data.morning_weight));
+        }
+        setLoaded(true);
+      });
+  }, [today]);
 
   const handleSave = async () => {
     const userId = getUserId();
