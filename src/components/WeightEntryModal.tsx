@@ -14,8 +14,6 @@ export default function WeightEntryModal({ date, onClose, onSaved }: Props) {
   const [weight, setWeight] = useState('');
   const [isFasting, setIsFasting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
   useEffect(() => {
     const userId = getUserId();
     if (!userId) return;
@@ -30,7 +28,6 @@ export default function WeightEntryModal({ date, onClose, onSaved }: Props) {
           setIsFasting(!!data.is_fasting_day);
           if (data.morning_weight) setWeight(String(data.morning_weight));
         }
-        setLoaded(true);
       });
   }, [today]);
 
